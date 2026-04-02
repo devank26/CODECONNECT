@@ -1,0 +1,33 @@
+# This is a GitHub Actions workflow to build a Java project
+
+name: Java CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up JDK
+      uses: actions/setup-java@v1
+      with:
+        java-version: '11'  # Adjust this as per your project requirement
+        distribution: 'temurin'
+
+    - name: Build with Gradle
+      run: ./gradlew build
+
+    - name: Publish to GitHub Packages
+      run: ./gradlew publish
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

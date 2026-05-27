@@ -148,17 +148,47 @@ public class AIAssistantController {
         try {
             String query = request.get("query");
             String mode = request.getOrDefault("mode", "DEFAULT");
+            String sessionId = request.getOrDefault("sessionId", UUID.randomUUID().toString());
             
             if (query == null || query.trim().isEmpty()) {
                 return errorResponse("Query is required");
             }
             
-            String aiResponse = aiAssistantService.genericQuery(query, mode);
+            Map<String, Object> aiResponse = aiAssistantService.genericQuery(query, mode, sessionId);
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("mode", mode);
-            response.put("response", aiResponse);
+            response.putAll(aiResponse); // contains status, response or toolJson, and sessionId
+            
+            return response;
+        } catch (Exception e) {
+            return errorResponse(e.getMessage());
+        }
+    }
+    
+    /**
+     * Endpoint for Web Frontend to approve or deny an AI tool request
+     */
+    @PostMapping("/tool/callback")
+    public Map<String, Object> handleToolCallback(
+        @RequestHeader(value = "Authorization", required = false) String authHeader,
+        @RequestBody Map<String, Object> request) {
+        
+        try {
+            String sessionId = (String) request.get("sessionId");
+            String toolJson = (String) request.get("toolJson");
+            Boolean approved = (Boolean) request.get("approved");
+            
+            if (sessionId == null || toolJson == null || approved == null) {
+                return errorResponse("sessionId, toolJson, and approved fields are required");
+            }
+            
+            Map<String, Object> aiResponse = aiAssistantService.handleToolCallback(sessionId, toolJson, approved);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.putAll(aiResponse);
             
             return response;
         } catch (Exception e) {

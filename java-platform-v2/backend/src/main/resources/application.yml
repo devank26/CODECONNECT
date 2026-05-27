@@ -61,3 +61,9 @@ management:
   endpoint:
     health:
       show-details: always
+
+ai:
+  url: http://localhost:11434/api/chat
+  model: phi3
+  api_key: ""
+  startup_command: "ollama run phi3"

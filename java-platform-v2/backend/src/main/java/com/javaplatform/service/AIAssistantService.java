@@ -1,17 +1,19 @@
 package com.javaplatform.service;
 
 import com.javaplatform.core.ErrorAnalyzer;
+import com.javaplatform.holyai.service.AICodeAssistant;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import lombok.extern.slf4j.Slf4j;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
 public class AIAssistantService {
     
-    @Autowired
-    private UniversalAIProvider aiProvider;
+    // Maintain stateful HolyAI sessions for the REST API
+    private final Map<String, AICodeAssistant> activeSessions = new ConcurrentHashMap<>();
     
     @Autowired
     private ErrorAnalyzer errorAnalyzer;
@@ -21,7 +23,10 @@ public class AIAssistantService {
      */
     public Map<String, Object> analyzeError(String errorMessage) {
         String prompt = "You are an expert Java developer. Analyze the following error, explain why it happened, and suggest a fix:\n\n" + errorMessage;
-        String aiResponse = extractJsonContent(aiProvider.generateResponse(prompt));
+        
+        // Single-shot stateless request
+        AICodeAssistant assistant = new AICodeAssistant();
+        String aiResponse = assistant.ask(prompt);
         
         Map<String, Object> response = new HashMap<>();
         response.put("error", errorMessage);
@@ -46,7 +51,9 @@ public class AIAssistantService {
      */
     public List<String> suggestCodeImprovements(String sourceCode) {
         String prompt = "You are a senior Java reviewer. Review this code and provide a bulleted list of improvements (e.g. security, performance, best practices):\n\n" + sourceCode;
-        String aiResponse = extractJsonContent(aiProvider.generateResponse(prompt));
+        
+        AICodeAssistant assistant = new AICodeAssistant();
+        String aiResponse = assistant.ask(prompt);
         
         return Arrays.asList(aiResponse.split("\n"));
     }
@@ -56,13 +63,14 @@ public class AIAssistantService {
      */
     public String explainConcept(String concept) {
         String prompt = "Explain the following Java concept briefly and clearly to a beginner:\n\n" + concept;
-        return extractJsonContent(aiProvider.generateResponse(prompt));
+        AICodeAssistant assistant = new AICodeAssistant();
+        return assistant.ask(prompt);
     }
     
     /**
-     * Generic query endpoint allowing custom prompts and modes
+     * Generic query endpoint allowing custom prompts and modes (Stateful for HolyAI)
      */
-    public String genericQuery(String query, String mode) {
+    public Map<String, Object> genericQuery(String query, String mode, String sessionId) {
         String systemPrompt = "You are a strict Java coding assistant. Rules:\n- Be concise\n- Explain your reasoning\n- Focus only on given input\n\n";
         String prompt = systemPrompt;
         
@@ -81,36 +89,52 @@ public class AIAssistantService {
                 break;
         }
         
-        return extractJsonContent(aiProvider.generateResponse(prompt));
+        AICodeAssistant assistant = activeSessions.computeIfAbsent(sessionId, k -> new AICodeAssistant());
+        String aiResponse = assistant.ask(prompt);
+        
+        return processToolResponse(aiResponse, sessionId);
     }
     
     /**
-     * Parses the naive JSON string to extract the content field
+     * Handle the user's approval or denial of a tool from the Web Frontend
      */
-    private String extractJsonContent(String raw) {
-        if (raw.startsWith("[ERROR]")) {
-            return raw;
-        }
-
-        StringBuilder result = new StringBuilder();
-        String[] lines = raw.split("\n");
-        for (String line : lines) {
-            if (line.contains("\"content\":\"")) {
-                try {
-                    String part = line.split("\"content\":\"")[1].split("\"")[0];
-                    result.append(part);
-                } catch (Exception ignored) {}
-            }
+    public Map<String, Object> handleToolCallback(String sessionId, String toolJson, boolean approved) {
+        AICodeAssistant assistant = activeSessions.get(sessionId);
+        if (assistant == null) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("message", "Session expired or invalid");
+            return err;
         }
         
-        if (result.length() == 0) {
-            return "Failed to parse JSON. Raw response:\n" + raw;
+        String nextAnswer;
+        if (approved) {
+            nextAnswer = assistant.executeToolAndContinue(toolJson);
+        } else {
+            nextAnswer = assistant.denyToolAndContinue();
         }
-
-        return result.toString()
-                .replace("\\n", "\n")
-                .replace("\\\"", "\"");
+        
+        return processToolResponse(nextAnswer, sessionId);
     }
+    
+    private Map<String, Object> processToolResponse(String rawResponse, String sessionId) {
+        Map<String, Object> result = new HashMap<>();
+        
+        if (rawResponse != null && rawResponse.startsWith("[TOOL_REQUEST]")) {
+            String toolJson = rawResponse.substring(14).trim();
+            result.put("status", "TOOL_REQUEST");
+            result.put("toolJson", toolJson);
+            result.put("sessionId", sessionId);
+        } else {
+            result.put("status", "SUCCESS");
+            result.put("response", rawResponse);
+            result.put("sessionId", sessionId);
+        }
+        
+        return result;
+    }
+    
+    // JSON parsing removed as HolyAI's AICodeAssistant handles it internally
     
     // Keep documentation methods as static lookups to save LLM tokens/latency
     

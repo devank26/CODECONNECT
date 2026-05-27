@@ -2,6 +2,7 @@ package com.javaplatform.view;
 
 import com.javaplatform.SessionState;
 import com.javaplatform.service.AIService;
+import com.javaplatform.holyai.service.AICodeAssistant;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -12,7 +13,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.concurrent.*;
 
 /**
- * AI Assistant tab — chat-style interface for Java coding help.
+ * AI Assistant tab — chat-style interface for Java coding help powered by HolyAI.
  */
 public class AIAssistantTab extends Tab {
 
@@ -29,6 +30,9 @@ public class AIAssistantTab extends Tab {
     });
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
+    
+    // Core HolyAI Engine
+    private final AICodeAssistant assistant = new AICodeAssistant();
 
     public AIAssistantTab() {
         super("🤖  AI Assistant");
@@ -124,7 +128,12 @@ public class AIAssistantTab extends Tab {
     private void ask() {
         String question = questionField.getText().trim();
         if (question.isEmpty()) return;
-        String code = codeContext.getText();
+        String code = codeContext.getText().trim();
+        
+        String fullQuery = question;
+        if (!code.isEmpty()) {
+            fullQuery += "\n\nCode Context:\n" + code;
+        }
 
         addUserBubble(question);
         questionField.clear();
@@ -132,13 +141,20 @@ public class AIAssistantTab extends Tab {
         askBtn.setText("⏳ Thinking…");
 
         executor.submit(() -> {
-            String answer = AIService.ask(question, code);
-            Platform.runLater(() -> {
-                addAIBubble(answer);
-                askBtn.setDisable(false);
-                askBtn.setText("Ask AI ✦");
-            });
+            String answer = assistant.ask(fullQuery);
+            Platform.runLater(() -> processAIResponse(answer));
         });
+    }
+
+    private void processAIResponse(String answer) {
+        if (answer != null && answer.startsWith("[TOOL_REQUEST]")) {
+            String toolJson = answer.substring(14).trim();
+            addToolRequestBubble(toolJson);
+        } else {
+            addAIBubble(answer);
+            askBtn.setDisable(false);
+            askBtn.setText("Ask AI ✦");
+        }
     }
 
     private void addUserBubble(String text) {
@@ -160,7 +176,6 @@ public class AIAssistantTab extends Tab {
     }
 
     private void addAIBubble(String text) {
-        // Split text at code-like sections (simple heuristic)
         Label label = new Label(text);
         label.setWrapText(true);
         label.setMaxWidth(460);
@@ -168,7 +183,7 @@ public class AIAssistantTab extends Tab {
                        "-fx-font-size: 13px; -fx-font-family: 'Segoe UI'; " +
                        "-fx-padding: 12 16; -fx-background-radius: 14;");
 
-        Label nameLabel = new Label("🤖 AI Assistant · " + LocalTime.now().format(TIME_FMT));
+        Label nameLabel = new Label("🤖 HolyAI · " + LocalTime.now().format(TIME_FMT));
         nameLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #60a5fa;");
 
         VBox bubble = new VBox(3, nameLabel, label);
@@ -176,6 +191,51 @@ public class AIAssistantTab extends Tab {
         row.setAlignment(Pos.CENTER_LEFT);
         row.setPadding(new Insets(0, 80, 0, 8));
         chatBox.getChildren().add(row);
+    }
+
+    private void addToolRequestBubble(String toolJson) {
+        Label alertLabel = new Label("⚠️ AI wants to execute a tool:");
+        alertLabel.setStyle("-fx-text-fill: #fbbf24; -fx-font-weight: bold; -fx-font-size: 13px;");
+        
+        Label toolLabel = new Label(toolJson);
+        toolLabel.setWrapText(true);
+        toolLabel.setMaxWidth(440);
+        toolLabel.setStyle("-fx-font-family: 'Consolas'; -fx-text-fill: #e0e0e0; -fx-font-size: 12px;");
+        
+        Button approveBtn = new Button("Approve");
+        approveBtn.setStyle("-fx-background-color: #22c55e; -fx-text-fill: white; -fx-cursor: hand;");
+        Button denyBtn = new Button("Deny");
+        denyBtn.setStyle("-fx-background-color: #ef4444; -fx-text-fill: white; -fx-cursor: hand;");
+        
+        HBox btnRow = new HBox(10, approveBtn, denyBtn);
+        VBox bubble = new VBox(6, alertLabel, toolLabel, btnRow);
+        bubble.setStyle("-fx-background-color: #2d1b1e; -fx-padding: 12 16; -fx-background-radius: 10; -fx-border-color: #ef4444; -fx-border-radius: 10;");
+        
+        HBox row = new HBox(bubble);
+        row.setAlignment(Pos.CENTER_LEFT);
+        row.setPadding(new Insets(0, 80, 0, 8));
+        chatBox.getChildren().add(row);
+        
+        // Handle interactions
+        approveBtn.setOnAction(e -> {
+            approveBtn.setDisable(true);
+            denyBtn.setDisable(true);
+            approveBtn.setText("Executing...");
+            executor.submit(() -> {
+                String nextAnswer = assistant.executeToolAndContinue(toolJson);
+                Platform.runLater(() -> processAIResponse(nextAnswer));
+            });
+        });
+        
+        denyBtn.setOnAction(e -> {
+            approveBtn.setDisable(true);
+            denyBtn.setDisable(true);
+            denyBtn.setText("Denied");
+            executor.submit(() -> {
+                String nextAnswer = assistant.denyToolAndContinue();
+                Platform.runLater(() -> processAIResponse(nextAnswer));
+            });
+        });
     }
 
     private void showWelcome() {

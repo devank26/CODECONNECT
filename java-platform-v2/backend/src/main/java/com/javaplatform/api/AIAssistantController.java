@@ -137,6 +137,35 @@ public class AIAssistantController {
         }
     }
     
+    /**
+     * Generic query endpoint
+     */
+    @PostMapping("/query")
+    public Map<String, Object> genericQuery(
+        @RequestHeader(value = "Authorization", required = false) String authHeader,
+        @RequestBody Map<String, String> request) {
+        
+        try {
+            String query = request.get("query");
+            String mode = request.getOrDefault("mode", "DEFAULT");
+            
+            if (query == null || query.trim().isEmpty()) {
+                return errorResponse("Query is required");
+            }
+            
+            String aiResponse = aiAssistantService.genericQuery(query, mode);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("mode", mode);
+            response.put("response", aiResponse);
+            
+            return response;
+        } catch (Exception e) {
+            return errorResponse(e.getMessage());
+        }
+    }
+    
     private Map<String, Object> errorResponse(String message) {
         Map<String, Object> error = new HashMap<>();
         error.put("success", false);

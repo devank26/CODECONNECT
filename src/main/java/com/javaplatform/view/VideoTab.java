@@ -375,6 +375,8 @@ public class VideoTab extends Tab {
     }
 
     public static String getLocalIPAddress() {
+        // Phase 1: Prefer virtual LAN adapters (Hamachi, Radmin VPN, ZeroTier) — enables global P2P via virtual LANs
+        String virtualLanKeywords[] = {"hamachi", "radmin", "zerotier", "zero tier"};
         try {
             java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
@@ -382,12 +384,39 @@ public class VideoTab extends Tab {
                 if (iface.isLoopback() || !iface.isUp()) continue;
                 String name = iface.getName().toLowerCase();
                 String displayName = iface.getDisplayName().toLowerCase();
-                if (name.contains("vbox") || name.contains("virtual") || name.contains("vmnet") || name.contains("wsl") ||
-                    name.contains("vpn") || name.contains("tun") || name.contains("tap") || name.contains("ppp") || name.contains("proton") ||
-                    displayName.contains("vbox") || displayName.contains("virtual") || displayName.contains("vmnet") || displayName.contains("wsl") ||
-                    displayName.contains("vpn") || displayName.contains("tun") || displayName.contains("tap") || displayName.contains("ppp") || displayName.contains("proton")) {
-                    continue;
+                boolean isVirtualLan = false;
+                for (String kw : virtualLanKeywords) {
+                    if (name.contains(kw) || displayName.contains(kw)) { isVirtualLan = true; break; }
                 }
+                if (!isVirtualLan) continue;
+                java.util.Enumeration<java.net.InetAddress> addresses = iface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    java.net.InetAddress addr = addresses.nextElement();
+                    if (addr instanceof java.net.Inet4Address) {
+                        String ip = addr.getHostAddress();
+                        if (!ip.equals("127.0.0.1") && !ip.equals("0.0.0.0")) {
+                            System.out.println("[VideoTab] Resolved IP via virtual LAN adapter (" + displayName + "): " + ip);
+                            return ip;
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // Phase 2: Physical adapters — exclude VPN/virtual adapters
+        String[] excludeKeywords = {"vpn", "tun", "tap", "ppp", "proton", "vbox", "virtual", "vmnet", "wsl", "hamachi", "radmin", "zerotier"};
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                java.net.NetworkInterface iface = interfaces.nextElement();
+                if (iface.isLoopback() || !iface.isUp()) continue;
+                String name = iface.getName().toLowerCase();
+                String displayName = iface.getDisplayName().toLowerCase();
+                boolean exclude = false;
+                for (String kw : excludeKeywords) {
+                    if (name.contains(kw) || displayName.contains(kw)) { exclude = true; break; }
+                }
+                if (exclude) continue;
                 java.util.Enumeration<java.net.InetAddress> addresses = iface.getInetAddresses();
                 while (addresses.hasMoreElements()) {
                     java.net.InetAddress addr = addresses.nextElement();
@@ -400,6 +429,8 @@ public class VideoTab extends Tab {
                 }
             }
         } catch (Exception ignored) {}
+
+        // Phase 3: DatagramSocket routing fallback
         try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
             socket.connect(java.net.InetAddress.getByName("8.8.8.8"), 10002);
             String ip = socket.getLocalAddress().getHostAddress();
@@ -603,10 +634,32 @@ public class VideoTab extends Tab {
             boolean connected = false;
             String workingHost = "localhost";
 
-            // 1. Try local IP first (skip if it is our own physical IP to avoid loopback self-connection)
+            // 1. Check if the target room is hosted on the embedded local server first
+            //    If yes, use localhost directly — this bypasses the self-IP loopback check
+            //    and enables the host machine to join its own room without false failures.
+            com.javaplatform.server.VideoRelayServer localServer = com.javaplatform.server.AppServer.getVideoServer();
+            boolean roomIsLocal = localServer != null && (
+                localServer.hasRoom(actualRoomId) ||
+                (localServer.hasAnyRoom() && (actualRoomId.equals("DIRECT_" + localTarget.replace(".", "_")) || isCreate))
+            );
+
+            if (roomIsLocal) {
+                // Room is on this machine's embedded server — connect via localhost
+                System.out.println("[VideoTab] Room '" + actualRoomId + "' is hosted locally. Forcing localhost connection.");
+                try {
+                    serviceInstance.connect("localhost");
+                    connected = true;
+                    workingHost = "localhost";
+                } catch (Exception localEx) {
+                    System.out.println("[VideoTab] Localhost connection failed: " + localEx.getMessage());
+                }
+            }
+
+            // 2. Try local (LAN/virtual) IP — skip if it matches our own physical IP (prevents false self-loopback)
             String myIp = getLocalIPAddress();
-            boolean isSelfPhysical = localTarget.equals(myIp) && !localTarget.equals("127.0.0.1") && !localTarget.equals("localhost");
-            if (!isSelfPhysical) {
+            boolean isSelfPhysical = !roomIsLocal && localTarget.equals(myIp)
+                    && !localTarget.equals("127.0.0.1") && !localTarget.equals("localhost");
+            if (!connected && !isSelfPhysical) {
                 try {
                     System.out.println("[VideoTab] Attempting connection to local target: " + localTarget);
                     serviceInstance.connect(localTarget);
@@ -615,7 +668,7 @@ public class VideoTab extends Tab {
                 } catch (Exception localEx) {
                     System.out.println("[VideoTab] Local connection failed: " + localEx.getMessage());
                 }
-            } else {
+            } else if (!connected) {
                 System.out.println("[VideoTab] Skipping local target connection (resolved to self IP): " + localTarget);
             }
 

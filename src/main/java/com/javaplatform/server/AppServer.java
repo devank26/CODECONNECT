@@ -9,6 +9,8 @@ public class AppServer {
     private static VideoRelayServer videoServer;
     private static org.bitlet.weupnp.GatewayDevice activeDevice;
 
+    public static VideoRelayServer getVideoServer() { return videoServer; }
+
     public static void start() {
         chatServer  = new ChatServer(9001);
         videoServer = new VideoRelayServer(9002);

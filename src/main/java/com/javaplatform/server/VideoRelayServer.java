@@ -71,6 +71,16 @@ public class VideoRelayServer implements Runnable {
         creator.roomId = roomId;
     }
 
+    /** Returns true if the server is currently hosting the given room ID. */
+    public boolean hasRoom(String roomId) {
+        return rooms.containsKey(roomId);
+    }
+
+    /** Returns true if the server has ANY active room. */
+    public boolean hasAnyRoom() {
+        return !rooms.isEmpty();
+    }
+
     /** Returns true if joined, false if room doesn't exist or full */
     boolean joinRoom(String roomId, PeerHandler joiner) {
         List<PeerHandler> room = rooms.get(roomId);

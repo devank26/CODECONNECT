@@ -603,14 +603,20 @@ public class VideoTab extends Tab {
             boolean connected = false;
             String workingHost = "localhost";
 
-            // 1. Try local IP first
-            try {
-                System.out.println("[VideoTab] Attempting connection to local target: " + localTarget);
-                serviceInstance.connect(localTarget);
-                connected = true;
-                workingHost = localTarget;
-            } catch (Exception localEx) {
-                System.out.println("[VideoTab] Local connection failed: " + localEx.getMessage());
+            // 1. Try local IP first (skip if it is our own physical IP to avoid loopback self-connection)
+            String myIp = getLocalIPAddress();
+            boolean isSelfPhysical = localTarget.equals(myIp) && !localTarget.equals("127.0.0.1") && !localTarget.equals("localhost");
+            if (!isSelfPhysical) {
+                try {
+                    System.out.println("[VideoTab] Attempting connection to local target: " + localTarget);
+                    serviceInstance.connect(localTarget);
+                    connected = true;
+                    workingHost = localTarget;
+                } catch (Exception localEx) {
+                    System.out.println("[VideoTab] Local connection failed: " + localEx.getMessage());
+                }
+            } else {
+                System.out.println("[VideoTab] Skipping local target connection (resolved to self IP): " + localTarget);
             }
 
             // 2. Try public IP if local failed and they are different (and not 0.0.0.0)

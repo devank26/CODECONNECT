@@ -44,6 +44,8 @@ public class VideoTab extends Tab {
 
     private VideoService videoService;
     private boolean muted = false;
+    /** Room ID that this instance is currently hosting/connected to. */
+    private String activeRoomId = null;
 
     public VideoTab() {
         super("📹  Video Call");
@@ -104,9 +106,19 @@ public class VideoTab extends Tab {
 
         joinBtn.setOnAction(e -> {
             String enteredRoomId = roomField.getText().trim();
-            if (!enteredRoomId.isEmpty()) {
-                reconnectVideoAndChat("", enteredRoomId, false);
+            if (enteredRoomId.isEmpty()) return;
+
+            // Guard: prevent the user from joining their own active room.
+            // Doing so would disconnect the existing VideoService (killing the hosted room)
+            // and then fail to reconnect — resulting in the "unreachable" error.
+            if (enteredRoomId.equals(activeRoomId)) {
+                ThemeManager tm = ThemeManager.getInstance();
+                statusLabel.setText("⚠ You are already hosting this room — share the ID with your peer");
+                statusLabel.setStyle("-fx-text-fill: #f59e0b; -fx-font-size: 12px;");
+                return;
             }
+
+            reconnectVideoAndChat("", enteredRoomId, false);
         });
 
         leaveBtn.setOnAction(e -> videoService.leaveRoom());
@@ -589,6 +601,13 @@ public class VideoTab extends Tab {
             actualRoomId = roomId;
         }
 
+        // Track the active room ID so the Join guard can detect self-joins.
+        if (isCreate) {
+            activeRoomId = roomId;
+        } else {
+            activeRoomId = null; // joining another room — clear until confirmed
+        }
+
         final VideoService serviceInstance = new VideoService(
                 "localhost", SessionState.VIDEO_PORT, username,
                 img -> localView.setImage(img),
@@ -599,6 +618,7 @@ public class VideoTab extends Tab {
                         String[] parts = msg.split("ID: ");
                         if (parts.length > 1) {
                             String id = parts[1].trim();
+                            activeRoomId = id; // confirm active room on server ack
                             Platform.runLater(() -> {
                                 roomIdLabel.setText("Room ID: " + id);
                                 leaveBtn.setDisable(false);

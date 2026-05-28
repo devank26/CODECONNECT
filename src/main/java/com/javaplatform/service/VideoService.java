@@ -71,6 +71,20 @@ public class VideoService {
         startReceiving();
     }
 
+    /**
+     * Connect to a WAN relay at an arbitrary host:port (SSH tunnel endpoint).
+     * Use this when the peer's Room ID contains a relay suffix (e.g. serveo.net:PORT).
+     */
+    public void connectToRelay(String relayHost, int relayPort) throws IOException {
+        socket = new Socket();
+        socket.connect(new java.net.InetSocketAddress(relayHost, relayPort), 8000);
+        in     = new DataInputStream(socket.getInputStream());
+        out    = new DataOutputStream(socket.getOutputStream());
+        connected = true;
+        sendText("REGISTER:" + username);
+        startReceiving();
+    }
+
     /** Create a new room; returns the room ID via the server TEXT response. */
     public void createRoom(String roomId) { sendText("CREATE_ROOM:" + roomId.trim()); }
 

@@ -90,13 +90,26 @@ public class VideoTab extends Tab {
             createBtn.setDisable(true);
             createBtn.setText("⏳ Resolving...");
             new Thread(() -> {
-                String localIp = getLocalIPAddress();
+                String localIp  = getLocalIPAddress();
                 String publicIp = getPublicIPAddress();
-                String myRoomId = encodeIpsToRoomId(localIp, publicIp);
-                Platform.runLater(() -> {
-                    createBtn.setDisable(false);
-                    createBtn.setText("Create Room");
-                    reconnectVideoAndChat("localhost", myRoomId, true);
+                String baseRoomId = encodeIpsToRoomId(localIp, publicIp);
+
+                // Start WAN relay tunnel (SSH to serveo.net) in parallel.
+                // Update the Room ID label once the relay address is known.
+                Platform.runLater(() -> statusLabel.setText("⏳ Starting WAN relay tunnel..."));
+                com.javaplatform.server.AppServer.startRelayTunnel(relay -> {
+                    String finalRoomId = (relay != null) ? baseRoomId + "~" + relay : baseRoomId;
+                    if (relay != null) {
+                        System.out.println("[VideoTab] WAN relay ready: " + relay + " -> Room ID: " + finalRoomId);
+                    } else {
+                        System.out.println("[VideoTab] No WAN relay (SSH unavailable). Using LAN Room ID: " + finalRoomId);
+                    }
+                    // Must call reconnect on FX thread
+                    javafx.application.Platform.runLater(() -> {
+                        createBtn.setDisable(false);
+                        createBtn.setText("Create Room");
+                        reconnectVideoAndChat("localhost", finalRoomId, true);
+                    });
                 });
             }, "public-ip-resolver").start();
         });
@@ -121,7 +134,11 @@ public class VideoTab extends Tab {
             reconnectVideoAndChat("", enteredRoomId, false);
         });
 
-        leaveBtn.setOnAction(e -> videoService.leaveRoom());
+        leaveBtn.setOnAction(e -> {
+            com.javaplatform.server.AppServer.stopRelayTunnel();
+            activeRoomId = null;
+            if (videoService != null) videoService.leaveRoom();
+        });
         leaveBtn.setDisable(true);
 
         roomControls = new HBox(10, createBtn, new Separator(),
@@ -583,22 +600,34 @@ public class VideoTab extends Tab {
 
         String username = SessionState.getInstance().getUsername();
         
+        // Strip optional WAN relay suffix "BASE36~host:port" before decoding IPs
+        final String relayTarget;  // e.g. "serveo.net:12345" or null
+        final String cleanRoomId;  // base36 portion only
+        if (roomId.contains("~")) {
+            int idx = roomId.indexOf('~');
+            cleanRoomId = roomId.substring(0, idx);
+            relayTarget = roomId.substring(idx + 1);
+        } else {
+            cleanRoomId = roomId;
+            relayTarget = null;
+        }
+
         final String localTarget;
         final String publicTarget;
         final String actualRoomId;
         if (isCreate || host.equals("localhost")) {
             localTarget = "localhost";
             publicTarget = "localhost";
-            actualRoomId = roomId;
-        } else if (roomId.matches("^(\\d{1,3}\\.){3}\\d{1,3}$") || roomId.equalsIgnoreCase("localhost")) {
-            localTarget = roomId;
-            publicTarget = roomId;
-            actualRoomId = "DIRECT_" + roomId.replace(".", "_");
+            actualRoomId = cleanRoomId;
+        } else if (cleanRoomId.matches("^(\\d{1,3}\\.){3}\\d{1,3}$") || cleanRoomId.equalsIgnoreCase("localhost")) {
+            localTarget = cleanRoomId;
+            publicTarget = cleanRoomId;
+            actualRoomId = "DIRECT_" + cleanRoomId.replace(".", "_");
         } else {
-            String[] decoded = decodeRoomIdToIps(roomId);
+            String[] decoded = decodeRoomIdToIps(cleanRoomId);
             publicTarget = decoded[0];
             localTarget = decoded[1];
-            actualRoomId = roomId;
+            actualRoomId = cleanRoomId;
         }
 
         // Track the active room ID so the Join guard can detect self-joins.
@@ -718,6 +747,21 @@ public class VideoTab extends Tab {
                     } catch (Exception candidateEx) {
                         System.out.println("[VideoTab] Candidate connection failed: " + candidateEx.getMessage());
                     }
+                }
+            }
+
+            // 4. WAN relay via SSH tunnel (serveo.net) — final fallback for cross-internet peers
+            if (!connected && !isCreate && relayTarget != null) {
+                try {
+                    String relayHost = relayTarget.split(":")[0];
+                    int    relayPort = Integer.parseInt(relayTarget.split(":")[1]);
+                    System.out.println("[VideoTab] Attempting WAN relay: " + relayTarget);
+                    // Connect VideoService to the relay host; the relay will forward to host's port 9002
+                    serviceInstance.connectToRelay(relayHost, relayPort);
+                    connected = true;
+                    workingHost = relayTarget;
+                } catch (Exception relayEx) {
+                    System.out.println("[VideoTab] WAN relay connection failed: " + relayEx.getMessage());
                 }
             }
 

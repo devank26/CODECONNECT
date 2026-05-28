@@ -86,7 +86,7 @@ public class VideoTab extends Tab {
         createBtn.setOnAction(e -> {
             String myIp = getLocalIPAddress();
             String myRoomId = encodeIpToRoomId(myIp);
-            videoService.createRoom(myRoomId);
+            reconnectVideoAndChat("localhost", myRoomId, true);
         });
 
         roomField.setPromptText("Room ID…");
@@ -96,7 +96,7 @@ public class VideoTab extends Tab {
             String enteredRoomId = roomField.getText().trim();
             if (!enteredRoomId.isEmpty()) {
                 String decodedHost = decodeRoomIdToIp(enteredRoomId);
-                reconnectVideoAndChat(decodedHost, enteredRoomId);
+                reconnectVideoAndChat(decodedHost, enteredRoomId, false);
             }
         });
 
@@ -339,11 +339,24 @@ public class VideoTab extends Tab {
     }
 
     public static String getLocalIPAddress() {
+        try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
+            socket.connect(java.net.InetAddress.getByName("8.8.8.8"), 10002);
+            String ip = socket.getLocalAddress().getHostAddress();
+            if (ip != null && !ip.isEmpty() && !ip.equals("0.0.0.0")) {
+                return ip;
+            }
+        } catch (Exception ignored) {}
         try {
             java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
                 java.net.NetworkInterface iface = interfaces.nextElement();
                 if (iface.isLoopback() || !iface.isUp()) continue;
+                String name = iface.getName().toLowerCase();
+                String displayName = iface.getDisplayName().toLowerCase();
+                if (name.contains("vbox") || name.contains("virtual") || name.contains("vmnet") || name.contains("wsl") ||
+                    displayName.contains("vbox") || displayName.contains("virtual") || displayName.contains("vmnet") || displayName.contains("wsl")) {
+                    continue;
+                }
                 java.util.Enumeration<java.net.InetAddress> addresses = iface.getInetAddresses();
                 while (addresses.hasMoreElements()) {
                     java.net.InetAddress addr = addresses.nextElement();
@@ -387,7 +400,7 @@ public class VideoTab extends Tab {
         }
     }
 
-    private void reconnectVideoAndChat(String host, String roomId) {
+    private void reconnectVideoAndChat(String host, String roomId, boolean isCreate) {
         SessionState.getInstance().setServerHost(host);
 
         if (MainWindow.getChatTab() != null) {
@@ -454,7 +467,11 @@ public class VideoTab extends Tab {
                     ThemeManager tm = ThemeManager.getInstance();
                     statusLabel.setText("● Connected to video server");
                     statusLabel.setStyle("-fx-text-fill: " + tm.runColor() + "; -fx-font-size: 12px;");
-                    videoService.joinRoom(roomId);
+                    if (isCreate) {
+                        videoService.createRoom(roomId);
+                    } else {
+                        videoService.joinRoom(roomId);
+                    }
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {

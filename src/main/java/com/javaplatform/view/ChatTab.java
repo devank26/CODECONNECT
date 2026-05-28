@@ -252,7 +252,13 @@ public class ChatTab extends Tab {
 
     private void showMessage(String rawMsg) {
         if (rawMsg.startsWith("SYSTEM:")) {
-            showSystemMessage(rawMsg.substring(7).trim());
+            String sysMsg = rawMsg.substring(7).trim();
+            showSystemMessage(sysMsg);
+            if (sysMsg.contains("joined the chat")) {
+                if (MainWindow.getCompilerTab() != null) {
+                    MainWindow.getCompilerTab().onPeerJoinedChat();
+                }
+            }
             return;
         }
 

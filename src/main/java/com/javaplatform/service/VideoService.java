@@ -213,11 +213,11 @@ public class VideoService {
             String roomId = msg.substring(8);
             notifyStatus("Room created. ID: " + roomId);
             startCapture();
-        } else if (msg.equals("PEER_CONNECTED")) {
-            notifyStatus("Peer connected! Starting capture...");
+        } else if (msg.startsWith("PEER_CONNECTED")) {
+            notifyStatus(msg);
             startCapture();
-        } else if (msg.equals("PEER_DISCONNECTED")) {
-            notifyStatus("Peer disconnected.");
+        } else if (msg.startsWith("PEER_DISCONNECTED")) {
+            notifyStatus(msg);
             stopCapture();
         } else if (msg.equals("ROOM_NOT_FOUND")) {
             notifyStatus("Room not found. Check the room ID.");

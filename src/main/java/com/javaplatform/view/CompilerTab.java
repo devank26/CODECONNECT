@@ -335,4 +335,10 @@ public class CompilerTab extends Tab {
             editorSplitPane.setDividerPositions(1.0);
         });
     }
+
+    public void onPeerJoinedChat() {
+        if (isSharing) {
+            sendCodeUpdate();
+        }
+    }
 }

@@ -2,7 +2,7 @@
 setlocal
 
 :: ── Configuration ─────────────────────────────────────────────────────────────
-set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-25.0.2
+set JAVA_HOME=C:\Program Files\Java\jdk-25.0.2
 set PATH=%JAVA_HOME%\bin;%PATH%
 set MVN_VERSION=3.9.6
 set MVN_DIR=%~dp0.mvn-local

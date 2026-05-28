@@ -37,15 +37,16 @@ public class VideoService {
 
     private volatile boolean cameraEnabled = true;
     private volatile boolean connected     = false;
+    private volatile boolean capturing     = false;
 
     // Callbacks to update JavaFX UI
     private final Consumer<javafx.scene.image.Image> localFrameConsumer;
-    private final Consumer<javafx.scene.image.Image> remoteFrameConsumer;
+    private final java.util.function.BiConsumer<String, javafx.scene.image.Image> remoteFrameConsumer;
     private final Consumer<String>                   statusConsumer;
 
     public VideoService(String host, int port, String username,
                         Consumer<javafx.scene.image.Image> localFrameConsumer,
-                        Consumer<javafx.scene.image.Image> remoteFrameConsumer,
+                        java.util.function.BiConsumer<String, javafx.scene.image.Image> remoteFrameConsumer,
                         Consumer<String>                   statusConsumer) {
         this.host                = host;
         this.port                = port;
@@ -66,7 +67,7 @@ public class VideoService {
     }
 
     /** Create a new room; returns the room ID via the server TEXT response. */
-    public void createRoom() { sendText("CREATE_ROOM"); }
+    public void createRoom(String roomId) { sendText("CREATE_ROOM:" + roomId.trim()); }
 
     /** Join an existing room. */
     public void joinRoom(String roomId) { sendText("JOIN_ROOM:" + roomId.trim()); }
@@ -79,30 +80,34 @@ public class VideoService {
 
     /** Start sending webcam frames. */
     public void startCapture() {
-        if (captureScheduler != null && !captureScheduler.isShutdown()) return; // Already running
+        if (capturing) return;
+        capturing = true;
 
-        try {
-            webcam = Webcam.getDefault();
-            if (webcam == null) {
-                notifyStatus("⚠ No webcam detected.");
-                return;
+        Thread initThread = new Thread(() -> {
+            try {
+                webcam = Webcam.getDefault();
+                if (webcam != null && !webcam.isOpen()) {
+                    webcam.setViewSize(WebcamResolution.QVGA.getSize());
+                    webcam.open();
+                }
+            } catch (Exception e) {
+                notifyStatus("⚠ Webcam error: " + e.getMessage());
             }
-            if (!webcam.isOpen()) {
-                webcam.setViewSize(WebcamResolution.QVGA.getSize());
-                webcam.open();
-            }
-        } catch (Exception e) {
-            notifyStatus("⚠ Webcam error: " + e.getMessage());
-            return;
-        }
 
-        captureScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "webcam-capture");
-            t.setDaemon(true);
-            return t;
-        });
-        long intervalMs = 1000L / FPS;
-        captureScheduler.scheduleAtFixedRate(this::captureAndSend, 0, intervalMs, TimeUnit.MILLISECONDS);
+            synchronized (this) {
+                if (capturing && (captureScheduler == null || captureScheduler.isShutdown())) {
+                    captureScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                        Thread t = new Thread(r, "webcam-capture");
+                        t.setDaemon(true);
+                        return t;
+                    });
+                    long intervalMs = 1000L / FPS;
+                    captureScheduler.scheduleAtFixedRate(this::captureAndSend, 0, intervalMs, TimeUnit.MILLISECONDS);
+                }
+            }
+        }, "webcam-init");
+        initThread.setDaemon(true);
+        initThread.start();
     }
 
     /** Toggle camera on/off without disconnecting. */
@@ -114,10 +119,19 @@ public class VideoService {
     public boolean isCameraEnabled() { return cameraEnabled; }
 
     private void captureAndSend() {
-        if (!connected || webcam == null || !webcam.isOpen()) return;
+        if (!connected) return;
         try {
-            BufferedImage frame = cameraEnabled ? webcam.getImage() : blankFrame();
-            if (frame == null) return;
+            BufferedImage frame;
+            if (cameraEnabled && webcam != null && webcam.isOpen()) {
+                frame = webcam.getImage();
+            } else if (!cameraEnabled) {
+                frame = blankFrame("Camera Off");
+            } else if (webcam != null) {
+                frame = blankFrame("Camera In Use");
+            } else {
+                frame = blankFrame("No Webcam");
+            }
+            if (frame == null) frame = blankFrame("No Webcam");
 
             // Update local preview
             if (localFrameConsumer != null) {
@@ -136,14 +150,15 @@ public class VideoService {
         }
     }
 
-    private BufferedImage blankFrame() {
+    private BufferedImage blankFrame(String text) {
         BufferedImage img = new BufferedImage(320, 240, BufferedImage.TYPE_INT_RGB);
         java.awt.Graphics2D g = img.createGraphics();
         g.setColor(java.awt.Color.BLACK);
         g.fillRect(0, 0, 320, 240);
         g.setColor(java.awt.Color.DARK_GRAY);
         g.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 16));
-        g.drawString("Camera Off", 110, 125);
+        int x = 160 - (text.length() * 4);
+        g.drawString(text, x, 125);
         g.dispose();
         return img;
     }
@@ -166,11 +181,24 @@ public class VideoService {
                         String msg = new String(payload, "UTF-8");
                         handleServerMessage(msg);
                     } else if (type == TYPE_FRAME && remoteFrameConsumer != null) {
-                        // Decode JPEG → JavaFX Image
-                        BufferedImage bImg = ImageIO.read(new ByteArrayInputStream(payload));
-                        if (bImg != null) {
-                            javafx.scene.image.Image fxImg = SwingFXUtils.toFXImage(bImg, null);
-                            Platform.runLater(() -> remoteFrameConsumer.accept(fxImg));
+                        try {
+                            DataInputStream payloadStream = new DataInputStream(new ByteArrayInputStream(payload));
+                            int nameLength = payloadStream.readInt();
+                            byte[] nameBytes = new byte[nameLength];
+                            payloadStream.readFully(nameBytes);
+                            String peerName = new String(nameBytes, "UTF-8");
+
+                            int frameLength = length - 4 - nameLength;
+                            byte[] frameBytes = new byte[frameLength];
+                            payloadStream.readFully(frameBytes);
+
+                            BufferedImage bImg = ImageIO.read(new ByteArrayInputStream(frameBytes));
+                            if (bImg != null) {
+                                javafx.scene.image.Image fxImg = SwingFXUtils.toFXImage(bImg, null);
+                                Platform.runLater(() -> remoteFrameConsumer.accept(peerName, fxImg));
+                            }
+                        } catch (Exception decodeEx) {
+                            // Ignore frame decoding errors so the stream doesn't crash
                         }
                     }
                 }
@@ -184,6 +212,7 @@ public class VideoService {
         if (msg.startsWith("ROOM_ID:")) {
             String roomId = msg.substring(8);
             notifyStatus("Room created. ID: " + roomId);
+            startCapture();
         } else if (msg.equals("PEER_CONNECTED")) {
             notifyStatus("Peer connected! Starting capture...");
             startCapture();
@@ -204,7 +233,9 @@ public class VideoService {
             out.writeInt(data.length);
             out.write(data);
             out.flush();
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            handleSendError(e);
+        }
     }
 
     private synchronized void sendFrame(byte[] frame) {
@@ -213,7 +244,16 @@ public class VideoService {
             out.writeInt(frame.length);
             out.write(frame);
             out.flush();
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            handleSendError(e);
+        }
+    }
+
+    private void handleSendError(IOException e) {
+        if (connected) {
+            disconnect();
+            notifyStatus("Disconnected from video server: " + e.getMessage());
+        }
     }
 
     private void notifyStatus(String msg) {
@@ -231,7 +271,15 @@ public class VideoService {
     }
 
     private void stopCapture() {
-        if (captureScheduler != null) captureScheduler.shutdownNow();
-        if (webcam != null && webcam.isOpen()) webcam.close();
+        capturing = false;
+        synchronized (this) {
+            if (captureScheduler != null) {
+                captureScheduler.shutdownNow();
+                captureScheduler = null;
+            }
+        }
+        if (webcam != null && webcam.isOpen()) {
+            webcam.close();
+        }
     }
 }

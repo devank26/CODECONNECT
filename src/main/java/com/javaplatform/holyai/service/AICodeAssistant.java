@@ -23,10 +23,10 @@ public class AICodeAssistant {
     public AICodeAssistant() {
         this.ai = AIFactory.getConfiguredProvider();
         this.chatSession = new ChatSession();
-        
+
         DocumentLoader loader = new DocumentLoader("docs");
         this.retriever = new Retriever(loader);
-        
+
         this.feedbackStore = new FeedbackStore();
         this.toolRegistry = new ToolRegistry();
     }
@@ -37,9 +37,10 @@ public class AICodeAssistant {
             Feedback bestExample = feedbackStore.findRelevantGoodExample(userInput);
 
             StringBuilder systemContent = new StringBuilder();
-            systemContent.append("You are an advanced Java coding assistant. CRITICAL RULE: Never write paragraphs of filler text when executing tools. Get straight to the point. However, if the user explicitly asks for a 'detailed explanation' or a 'comprehensive analysis', you may provide a thorough and detailed response.\n");
+            systemContent.append(
+                    "You are Holy AI, an advanced Java coding assistant created by Aadarsh. CRITICAL RULE: Never write paragraphs of filler text when executing tools. Get straight to the point. However, if the user explicitly asks for a 'detailed explanation' or a 'comprehensive analysis', you may provide a thorough and detailed response.\n");
             systemContent.append(toolRegistry.getSystemPromptExtension());
-            
+
             if (!contextDocs.isEmpty()) {
                 systemContent.append("\n--- CONTEXT (Use this to answer if relevant) ---\n");
                 for (String doc : contextDocs) {
@@ -74,9 +75,11 @@ public class AICodeAssistant {
             int braceCount = 0;
             int jsonEnd = -1;
             for (int i = jsonStart; i < finalAnswer.length(); i++) {
-                if (finalAnswer.charAt(i) == '{') braceCount++;
-                else if (finalAnswer.charAt(i) == '}') braceCount--;
-                
+                if (finalAnswer.charAt(i) == '{')
+                    braceCount++;
+                else if (finalAnswer.charAt(i) == '}')
+                    braceCount--;
+
                 if (braceCount == 0) {
                     jsonEnd = i;
                     break;
@@ -96,7 +99,7 @@ public class AICodeAssistant {
         try {
             String toolName = extractJsonValue(toolJson, "tool");
             String args = extractJsonValue(toolJson, "args");
-            
+
             Tool tool = toolRegistry.getTool(toolName);
             if (tool == null) {
                 chatSession.addSystemMessage("Tool execution failed: Tool '" + toolName + "' not found.");
@@ -107,8 +110,8 @@ public class AICodeAssistant {
         } catch (Exception e) {
             chatSession.addSystemMessage("Tool execution failed: " + e.getMessage());
         }
-        
-        return ask(null); 
+
+        return ask(null);
     }
 
     public String denyToolAndContinue() {
@@ -121,15 +124,17 @@ public class AICodeAssistant {
     }
 
     private String extractJsonContent(String raw) {
-        if (raw.startsWith("[ERROR]")) return raw;
-        
+        if (raw.startsWith("[ERROR]"))
+            return raw;
+
         StringBuilder result = new StringBuilder();
         String search = "\"content\":";
         int index = raw.indexOf(search);
         while (index != -1) {
             int startQuote = raw.indexOf("\"", index + search.length());
-            if (startQuote == -1) break;
-            
+            if (startQuote == -1)
+                break;
+
             int endQuote = startQuote + 1;
             while (endQuote < raw.length()) {
                 if (raw.charAt(endQuote) == '\"' && raw.charAt(endQuote - 1) != '\\') {
@@ -137,14 +142,15 @@ public class AICodeAssistant {
                 }
                 endQuote++;
             }
-            
+
             if (endQuote < raw.length()) {
                 result.append(raw.substring(startQuote + 1, endQuote));
             }
             index = raw.indexOf(search, endQuote);
         }
-        
-        if (result.length() == 0) return raw;
+
+        if (result.length() == 0)
+            return raw;
         return result.toString().replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
     }
 
@@ -154,14 +160,17 @@ public class AICodeAssistant {
         if (start == -1) {
             search = "\"" + key + "\": ";
             start = json.indexOf(search);
-            if (start == -1) return "";
+            if (start == -1)
+                return "";
         }
         start += search.length();
-        
+
         int quoteStart = json.indexOf("\"", start);
-        if (quoteStart == -1) return "";
+        if (quoteStart == -1)
+            return "";
         int quoteEnd = json.indexOf("\"", quoteStart + 1);
-        if (quoteEnd == -1) return "";
+        if (quoteEnd == -1)
+            return "";
         return json.substring(quoteStart + 1, quoteEnd);
     }
 }

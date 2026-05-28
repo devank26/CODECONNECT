@@ -1,6 +1,7 @@
 package com.javaplatform.view;
 
 import com.javaplatform.SessionState;
+import com.javaplatform.ThemeManager;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -24,8 +25,17 @@ public class ChatTab extends Tab {
     private final VBox     msgBox   = new VBox(8);
     private final TextField inputField;
     private final Label    statusLabel;
+    private final Button   reconnectBtn = new Button("🔄 Reconnect");
+
+    private HBox header;
+    private Label titleLabel;
+    private Label youLabel;
+    private ScrollPane scroll;
+    private HBox inputBar;
+    private Button sendBtn;
 
     private PrintWriter out;
+    private Socket      currentSocket;
     private boolean     connected = false;
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
@@ -39,51 +49,47 @@ public class ChatTab extends Tab {
 
         setContent(buildUI());
         connect();
+
+        ThemeManager.getInstance().addThemeListener(this::applyTheme);
+        applyTheme();
     }
 
     private Pane buildUI() {
         // ── Header ────────────────────────────────────────────────────────
-        statusLabel.setStyle("-fx-text-fill: #888; -fx-font-size: 12px; -fx-font-family: 'Segoe UI';");
-        Label title = new Label("Live Chat");
-        title.setStyle("-fx-text-fill: #e0e0e0; -fx-font-size: 18px; -fx-font-weight: bold; -fx-font-family: 'Segoe UI';");
-        Label you = new Label("You: " + username);
-        you.setStyle("-fx-text-fill: #7c3aed; -fx-font-size: 13px; -fx-font-family: 'Segoe UI';");
+        titleLabel = new Label("Live Chat");
+        youLabel = new Label("You: " + username);
 
-        HBox header = new HBox(16, title, you, statusLabel);
+        reconnectBtn.setOnAction(e -> connect());
+
+        header = new HBox(16, titleLabel, youLabel, statusLabel, reconnectBtn);
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPadding(new Insets(10, 16, 10, 16));
-        header.setStyle("-fx-background-color: #1e1e2e; -fx-border-color: #2d2d45; -fx-border-width: 0 0 1 0;");
 
         // ── Messages scroll area ──────────────────────────────────────────
         msgBox.setPadding(new Insets(16));
-        msgBox.setStyle("-fx-background-color: #0f0f1a;");
-        ScrollPane scroll = new ScrollPane(msgBox);
+        scroll = new ScrollPane(msgBox);
         scroll.setFitToWidth(true);
-        scroll.setStyle("-fx-background-color: #0f0f1a; -fx-background: #0f0f1a;");
         scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        // Auto-scroll on new content
-        msgBox.heightProperty().addListener((obs, old, nw) ->
-                scroll.setVvalue(1.0));
+        msgBox.heightProperty().addListener((obs, old, nw) -> scroll.setVvalue(1.0));
         VBox.setVgrow(scroll, Priority.ALWAYS);
 
         // ── Input bar ─────────────────────────────────────────────────────
         inputField.setPromptText("Type a message… (Enter to send)");
-        inputField.setStyle("-fx-background-color: #1e1e2e; -fx-text-fill: #e0e0e0; " +
-                             "-fx-border-color: #444; -fx-border-radius: 20; " +
-                             "-fx-background-radius: 20; -fx-font-size: 13px; -fx-padding: 10 16;");
         HBox.setHgrow(inputField, Priority.ALWAYS);
 
-        Button sendBtn = new Button("Send ➤");
-        sendBtn.setStyle("-fx-background-color: #7c3aed; -fx-text-fill: white; " +
-                         "-fx-font-size: 13px; -fx-font-weight: bold; " +
-                         "-fx-background-radius: 20; -fx-padding: 10 20; -fx-cursor: hand;");
-        sendBtn.setOnMouseEntered(e -> sendBtn.setStyle(sendBtn.getStyle().replace("#7c3aed", "#6d28d9")));
-        sendBtn.setOnMouseExited( e -> sendBtn.setStyle(sendBtn.getStyle().replace("#6d28d9", "#7c3aed")));
+        sendBtn = new Button("Send ➤");
+        sendBtn.setOnMouseEntered(e -> {
+            ThemeManager tm = ThemeManager.getInstance();
+            sendBtn.setStyle(sendBtn.getStyle().replace(tm.accent(), tm.accentHover()));
+        });
+        sendBtn.setOnMouseExited(e -> {
+            ThemeManager tm = ThemeManager.getInstance();
+            sendBtn.setStyle(sendBtn.getStyle().replace(tm.accentHover(), tm.accent()));
+        });
 
-        HBox inputBar = new HBox(10, inputField, sendBtn);
+        inputBar = new HBox(10, inputField, sendBtn);
         inputBar.setPadding(new Insets(12, 16, 12, 16));
         inputBar.setAlignment(Pos.CENTER);
-        inputBar.setStyle("-fx-background-color: #1e1e2e; -fx-border-color: #2d2d45; -fx-border-width: 1 0 0 0;");
 
         Runnable sendAction = this::sendMessage;
         sendBtn.setOnAction(e -> sendAction.run());
@@ -92,14 +98,97 @@ public class ChatTab extends Tab {
         // ── Root ──────────────────────────────────────────────────────────
         VBox root = new VBox(header, scroll, inputBar);
         VBox.setVgrow(scroll, Priority.ALWAYS);
-        root.setStyle("-fx-background-color: #0f0f1a;");
         return root;
     }
 
+    private void applyTheme() {
+        ThemeManager tm = ThemeManager.getInstance();
+
+        // Header and layout
+        header.setStyle("-fx-background-color: " + tm.bgCard() + "; -fx-border-color: " + tm.border() + "; -fx-border-width: 0 0 1 0;");
+        titleLabel.setStyle(tm.getLabelStyle(18, true, false));
+        youLabel.setStyle("-fx-text-fill: " + tm.accent() + "; -fx-font-size: 13px; -fx-font-family: 'Segoe UI';");
+        statusLabel.setStyle("-fx-text-fill: " + (connected ? tm.runColor() : tm.errorColor()) + "; -fx-font-size: 12px; -fx-font-family: 'Segoe UI';");
+
+        reconnectBtn.setStyle(tm.getButtonStyle(tm.isDarkMode() ? "#374151" : "#cbd5e1") + " -fx-text-fill: " + tm.textPrimary() + "; -fx-font-size: 11px; -fx-padding: 4 8;");
+
+        // Message Scroll area
+        msgBox.setStyle("-fx-background-color: " + tm.bgApp() + ";");
+        scroll.setStyle("-fx-background-color: " + tm.bgApp() + "; -fx-background: " + tm.bgApp() + ";");
+
+        // Input bar
+        inputBar.setStyle("-fx-background-color: " + tm.bgCard() + "; -fx-border-color: " + tm.border() + "; -fx-border-width: 1 0 0 0;");
+        inputField.setStyle(String.format(
+            "-fx-background-color: %s; -fx-text-fill: %s; -fx-prompt-text-fill: %s; -fx-border-color: %s; -fx-border-radius: 20; -fx-background-radius: 20; -fx-font-size: 13px; -fx-padding: 10 16;",
+            tm.bgInput(), tm.textPrimary(), tm.textMuted(), tm.border()
+        ));
+
+        sendBtn.setStyle(String.format(
+            "-fx-background-color: %s; -fx-text-fill: white; -fx-font-size: 13px; -fx-font-weight: bold; -fx-background-radius: 20; -fx-padding: 10 20; -fx-cursor: hand;",
+            tm.accent()
+        ));
+
+        // Re-style all existing message bubbles in UI
+        for (javafx.scene.Node rowNode : msgBox.getChildren()) {
+            if (rowNode instanceof HBox) {
+                HBox row = (HBox) rowNode;
+                if (row.getChildren().size() == 1) {
+                    javafx.scene.Node firstChild = row.getChildren().get(0);
+                    if (firstChild instanceof Label) {
+                        Label sysLabel = (Label) firstChild;
+                        sysLabel.setStyle("-fx-text-fill: " + tm.textMuted() + "; -fx-font-size: 11px; -fx-font-family: 'Segoe UI';");
+                    } else if (firstChild instanceof VBox) {
+                        restyleBubbleVBox((VBox) firstChild, tm, row.getAlignment() == Pos.CENTER_RIGHT);
+                    }
+                }
+            }
+        }
+    }
+
+    private void restyleBubbleVBox(VBox bubble, ThemeManager tm, boolean isMe) {
+        if (bubble.getChildren().size() == 3) {
+            Label senderLabel = (Label) bubble.getChildren().get(0);
+            Label msgLabel    = (Label) bubble.getChildren().get(1);
+            Label timeLabel   = (Label) bubble.getChildren().get(2);
+
+            senderLabel.setStyle("-fx-font-size: 11px; -fx-font-weight: bold; -fx-text-fill: " + (isMe ? tm.accent() : tm.cyan()) + ";");
+            msgLabel.setStyle(String.format(
+                "-fx-font-size: 13px; -fx-font-family: 'Segoe UI'; -fx-padding: 10 14; -fx-background-radius: 14; -fx-background-color: %s; -fx-text-fill: %s;",
+                isMe ? tm.chatBubbleMeBg() : tm.chatBubblePeerBg(),
+                isMe ? tm.chatBubbleMeFg() : tm.chatBubblePeerFg()
+            ));
+            timeLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: " + tm.textMuted() + ";");
+        }
+    }
+
+    public void disconnect() {
+        connected = false;
+        if (currentSocket != null) {
+            try { currentSocket.close(); } catch (Exception ignored) {}
+            currentSocket = null;
+        }
+    }
+
+    public void reconnectToHost(String host) {
+        SessionState.getInstance().setServerHost(host);
+        disconnect();
+        connect();
+    }
+
     private void connect() {
+        Platform.runLater(() -> {
+            ThemeManager tm = ThemeManager.getInstance();
+            statusLabel.setStyle("-fx-text-fill: " + tm.textMuted() + "; -fx-font-size: 12px;");
+            statusLabel.setText("⚡ Connecting…");
+            reconnectBtn.setVisible(false);
+            reconnectBtn.setManaged(false);
+        });
+
         Thread t = new Thread(() -> {
             try {
-                Socket socket = new Socket(SessionState.HOST, SessionState.CHAT_PORT);
+                disconnect();
+                Socket socket = new Socket(SessionState.getInstance().getServerHost(), SessionState.CHAT_PORT);
+                currentSocket = socket;
                 BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
                 out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), "UTF-8"), true);
                 connected = true;
@@ -107,8 +196,11 @@ public class ChatTab extends Tab {
                 // Register username
                 out.println("USERNAME:" + username);
                 Platform.runLater(() -> {
-                    statusLabel.setStyle("-fx-text-fill: #22c55e; -fx-font-size: 12px;");
+                    ThemeManager tm = ThemeManager.getInstance();
+                    statusLabel.setStyle("-fx-text-fill: " + tm.runColor() + "; -fx-font-size: 12px;");
                     statusLabel.setText("● Connected");
+                    reconnectBtn.setVisible(false);
+                    reconnectBtn.setManaged(false);
                 });
 
                 // Read loop
@@ -117,23 +209,45 @@ public class ChatTab extends Tab {
                     final String msg = line;
                     Platform.runLater(() -> showMessage(msg));
                 }
+                throw new IOException("Connection closed by server.");
             } catch (IOException e) {
-                Platform.runLater(() -> {
-                    statusLabel.setStyle("-fx-text-fill: #ef4444; -fx-font-size: 12px;");
-                    statusLabel.setText("✘ Disconnected");
-                    showSystemMessage("Could not connect to chat server: " + e.getMessage());
-                });
+                handleDisconnect(e);
             }
         }, "chat-reader");
         t.setDaemon(true);
         t.start();
     }
 
+    private void handleDisconnect(IOException e) {
+        connected = false;
+        Platform.runLater(() -> {
+            ThemeManager tm = ThemeManager.getInstance();
+            statusLabel.setStyle("-fx-text-fill: " + tm.errorColor() + "; -fx-font-size: 12px;");
+            statusLabel.setText("✘ Disconnected");
+            reconnectBtn.setVisible(true);
+            reconnectBtn.setManaged(true);
+            showSystemMessage("Chat connection error: " + e.getMessage());
+        });
+    }
+
+    public void sendRawMessage(String msg) {
+        if (connected && out != null) {
+            out.println(msg);
+            if (out.checkError()) {
+                handleDisconnect(new IOException("Write failed (connection lost)."));
+            }
+        }
+    }
+
     private void sendMessage() {
         String text = inputField.getText().trim();
         if (text.isEmpty() || !connected) return;
         out.println("MSG:" + text);
-        inputField.clear();
+        if (out.checkError()) {
+            handleDisconnect(new IOException("Write failed (connection lost)."));
+        } else {
+            inputField.clear();
+        }
     }
 
     private void showMessage(String rawMsg) {
@@ -146,24 +260,37 @@ public class ChatTab extends Tab {
         int colon = rawMsg.indexOf(": ");
         String sender = colon > 0 ? rawMsg.substring(0, colon) : "Unknown";
         String text   = colon > 0 ? rawMsg.substring(colon + 2) : rawMsg;
+
+        if (text.startsWith("CODE_SHARE:")) {
+            String encodedCode = text.substring(11);
+            try {
+                String decodedCode = java.net.URLDecoder.decode(encodedCode, "UTF-8");
+                if (MainWindow.getCompilerTab() != null) {
+                    MainWindow.getCompilerTab().showSharedCode(sender, decodedCode);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        if (text.equals("CODE_SHARE_STOP")) {
+            if (MainWindow.getCompilerTab() != null) {
+                MainWindow.getCompilerTab().hideSharedCode(sender);
+            }
+            return;
+        }
+
         boolean isMe  = sender.equals(username);
 
-        // ── Bubble ────────────────────────────────────────────────────────
+        // ── Bubble Labels ───────────────────────────────────────────────────
+        Label senderLabel = new Label(isMe ? "You" : sender);
         Label msgLabel = new Label(text);
         msgLabel.setWrapText(true);
         msgLabel.setMaxWidth(340);
-        msgLabel.setStyle("-fx-font-size: 13px; -fx-font-family: 'Segoe UI'; " +
-                          "-fx-padding: 10 14; -fx-background-radius: 14; " +
-                          (isMe ? "-fx-background-color: #4c1d95; -fx-text-fill: #e0d4ff;"
-                                : "-fx-background-color: #1e2a3e; -fx-text-fill: #e0e0e0;"));
 
         String timeStr = LocalTime.now().format(TIME_FMT);
         Label timeLabel = new Label(timeStr);
-        timeLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #555;");
-
-        Label senderLabel = new Label(isMe ? "You" : sender);
-        senderLabel.setStyle("-fx-font-size: 11px; -fx-font-weight: bold; " +
-                             (isMe ? "-fx-text-fill: #a78bfa;" : "-fx-text-fill: #60a5fa;"));
 
         VBox bubble = new VBox(2, senderLabel, msgLabel, timeLabel);
         bubble.setMaxWidth(360);
@@ -176,11 +303,15 @@ public class ChatTab extends Tab {
             row.setAlignment(Pos.CENTER_LEFT);
         }
         msgBox.getChildren().add(row);
+
+        // Style the bubble immediately according to the active theme
+        restyleBubbleVBox(bubble, ThemeManager.getInstance(), isMe);
     }
 
     private void showSystemMessage(String text) {
+        ThemeManager tm = ThemeManager.getInstance();
         Label l = new Label("— " + text + " —");
-        l.setStyle("-fx-text-fill: #555; -fx-font-size: 11px; -fx-font-family: 'Segoe UI';");
+        l.setStyle("-fx-text-fill: " + tm.textMuted() + "; -fx-font-size: 11px; -fx-font-family: 'Segoe UI';");
         HBox row = new HBox(l);
         row.setAlignment(Pos.CENTER);
         row.setPadding(new Insets(4));

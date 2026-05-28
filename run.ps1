@@ -1,5 +1,5 @@
 # ── Configuration ─────────────────────────────────────────────────────────────
-$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-25.0.1.8-hotspot"
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-25.0.2"
 $env:PATH = "${env:JAVA_HOME}\bin;${env:PATH}"
 $MvnVersion = "3.9.6"
 $MvnDir = Join-Path $PSScriptRoot ".mvn-local"

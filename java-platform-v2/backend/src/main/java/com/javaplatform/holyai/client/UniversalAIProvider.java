@@ -3,6 +3,7 @@ package com.javaplatform.holyai.client;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.ConnectException;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
@@ -26,7 +27,7 @@ public class UniversalAIProvider implements AIProvider {
     public String generateResponse(List<Message> messages) {
         try {
             return sendHttpRequest(messages);
-        } catch (java.net.ConnectException e) {
+        } catch (ConnectException e) {
             if (startupCommand != null && !startupCommand.trim().isEmpty()) {
                 System.out.println("Connection failed. Attempting to start local AI provider using: " + startupCommand);
                 try {

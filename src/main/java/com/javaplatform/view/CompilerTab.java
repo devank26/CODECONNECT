@@ -1,6 +1,7 @@
 package com.javaplatform.view;
 
 import com.javaplatform.SessionState;
+import com.javaplatform.ThemeManager;
 import com.javaplatform.service.CompilerResult;
 import com.javaplatform.service.CompilerService;
 import javafx.application.Platform;
@@ -35,6 +36,32 @@ public class CompilerTab extends Tab {
     private final Button   runBtn      = new Button("▶  Run");
     private final Label    statusLabel = new Label("Ready");
 
+    private final TextArea sharedCodeArea = new TextArea();
+    private final Label    sharedCodeLabel = new Label("📺 Live Shared Code");
+    private final Button   shareBtn    = new Button("📡 Share Code");
+
+    private SplitPane editorSplitPane;
+    private boolean isSharing = false;
+
+    private final java.util.concurrent.ScheduledExecutorService shareExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "code-share-debounce");
+        t.setDaemon(true);
+        return t;
+    });
+    private java.util.concurrent.ScheduledFuture<?> pendingTask = null;
+
+    private final javafx.beans.value.ChangeListener<String> codeListener = (obs, oldVal, newVal) -> queueCodeShare();
+
+    private Label codeLabel;
+    private Label stdinLabel;
+    private Label outputLabel;
+    private Label errorLabel;
+    private Label hintLabel;
+    private Button clearBtn;
+
+    private VBox root;
+    private ScrollPane scroll;
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "compiler-thread");
         t.setDaemon(true);
@@ -45,63 +72,67 @@ public class CompilerTab extends Tab {
         super("☕  Compiler");
         setClosable(false);
         setContent(buildUI());
+        ThemeManager.getInstance().addThemeListener(this::applyTheme);
+        applyTheme();
     }
 
     private Node buildUI() {
         // ── Code editor ───────────────────────────────────────────────────
-        styleTextArea(codeArea, "#0d0d1a", "#e0e0e0", "Consolas, 'Courier New'", 13);
         codeArea.setWrapText(false);
         codeArea.setPrefRowCount(20);
 
-        Label codeLabel = sectionLabel("📝 Java Code Editor");
-        VBox codeBox    = withLabel(codeLabel, codeArea);
+        codeLabel = new Label("📝 Java Code Editor");
+        VBox codeBox = withLabel(codeLabel, codeArea);
+
+        // ── Shared Code Editor ────────────────────────────────────────────
+        sharedCodeArea.setEditable(false);
+        sharedCodeArea.setWrapText(false);
+        sharedCodeArea.setPrefRowCount(20);
+        sharedCodeArea.setPromptText("Live shared code from other peers will appear here when they share...");
+        VBox sharedCodeBox = withLabel(sharedCodeLabel, sharedCodeArea);
+
+        // ── Editor SplitPane ──────────────────────────────────────────────
+        editorSplitPane = new SplitPane(codeBox, sharedCodeBox);
+        editorSplitPane.setDividerPositions(1.0); // Hide shared code by default
 
         // ── Stdin ─────────────────────────────────────────────────────────
-        styleTextArea(stdinArea, "#1a1a2e", "#c0c0c0", "Consolas", 12);
         stdinArea.setPromptText("Optional: provide stdin input here…");
         stdinArea.setPrefRowCount(3);
-        Label stdinLabel = sectionLabel("⌨  Standard Input (optional)");
-        VBox stdinBox    = withLabel(stdinLabel, stdinArea);
+        stdinLabel = new Label("⌨  Standard Input (optional)");
+        VBox stdinBox = withLabel(stdinLabel, stdinArea);
 
-        // ── Run button ────────────────────────────────────────────────────
-        runBtn.setStyle("-fx-background-color: #16a34a; -fx-text-fill: white; " +
-                        "-fx-font-size: 14px; -fx-font-weight: bold; " +
-                        "-fx-background-radius: 8; -fx-padding: 10 28; -fx-cursor: hand;");
-        runBtn.setOnMouseEntered(e -> runBtn.setStyle(runBtn.getStyle().replace("#16a34a", "#15803d")));
-        runBtn.setOnMouseExited( e -> runBtn.setStyle(runBtn.getStyle().replace("#15803d", "#16a34a")));
+        // ── Buttons ────────────────────────────────────────────────────
         runBtn.setOnAction(e -> run());
 
-        Button clearBtn = new Button("✕  Clear");
-        clearBtn.setStyle("-fx-background-color: #374151; -fx-text-fill: #d0d0d0; " +
-                          "-fx-font-size: 13px; -fx-background-radius: 8; -fx-padding: 10 20; -fx-cursor: hand;");
+        clearBtn = new Button("✕  Clear");
         clearBtn.setOnAction(e -> { outputArea.clear(); errorArea.clear(); hintArea.clear(); statusLabel.setText("Ready"); });
 
-        statusLabel.setStyle("-fx-text-fill: #888; -fx-font-size: 12px;");
+        shareBtn.setOnAction(e -> toggleSharing());
 
-        HBox btnBar = new HBox(12, runBtn, clearBtn, statusLabel);
+        HBox btnBar = new HBox(12, runBtn, clearBtn, shareBtn, statusLabel);
         btnBar.setAlignment(Pos.CENTER_LEFT);
 
         // ── Output ────────────────────────────────────────────────────────
-        styleTextArea(outputArea, "#0a1a0a", "#22c55e", "Consolas", 12);
         outputArea.setEditable(false);
         outputArea.setPromptText("Program output appears here…");
         outputArea.setPrefRowCount(8);
-        VBox outputBox = withLabel(sectionLabel("✅ Output"), outputArea);
+        outputLabel = new Label("✅ Output");
+        VBox outputBox = withLabel(outputLabel, outputArea);
 
         // ── Errors ────────────────────────────────────────────────────────
-        styleTextArea(errorArea, "#1a0a0a", "#ef4444", "Consolas", 12);
         errorArea.setEditable(false);
         errorArea.setPromptText("Errors appear here…");
         errorArea.setPrefRowCount(5);
-        VBox errorBox = withLabel(sectionLabel("❌ Errors / Exceptions"), errorArea);
+        errorLabel = new Label("❌ Errors / Exceptions");
+        VBox errorBox = withLabel(errorLabel, errorArea);
 
         // ── Hints ─────────────────────────────────────────────────────────
-        styleTextArea(hintArea, "#1a1200", "#fbbf24", "Segoe UI", 12);
         hintArea.setEditable(false);
         hintArea.setPromptText("Friendly error explanations appear here…");
         hintArea.setPrefRowCount(5);
         hintArea.setWrapText(true);
-        VBox hintBox = withLabel(sectionLabel("💡 Error Analysis & Hints"), hintArea);
+        hintLabel = new Label("💡 Error Analysis & Hints");
+        VBox hintBox = withLabel(hintLabel, hintArea);
 
         // ── Bottom split ──────────────────────────────────────────────────
         HBox bottomRow = new HBox(12, errorBox, hintBox);
@@ -109,17 +140,94 @@ public class CompilerTab extends Tab {
         HBox.setHgrow(hintBox,  Priority.ALWAYS);
 
         // ── Main layout ───────────────────────────────────────────────────
-        VBox root = new VBox(12,
-                codeBox, stdinBox, btnBar, outputBox, bottomRow);
+        root = new VBox(12, editorSplitPane, stdinBox, btnBar, outputBox, bottomRow);
         root.setPadding(new Insets(16));
-        root.setStyle("-fx-background-color: #0f0f1a;");
-        VBox.setVgrow(codeArea,   Priority.ALWAYS);
-        VBox.setVgrow(codeBox,    Priority.ALWAYS);
+        VBox.setVgrow(editorSplitPane, Priority.ALWAYS);
 
-        ScrollPane scroll = new ScrollPane(root);
+        scroll = new ScrollPane(root);
         scroll.setFitToWidth(true);
-        scroll.setStyle("-fx-background-color: #0f0f1a; -fx-background: #0f0f1a;");
         return scroll;
+    }
+
+    private void applyTheme() {
+        ThemeManager tm = ThemeManager.getInstance();
+
+        // Backgrounds
+        root.setStyle("-fx-background-color: " + tm.bgApp() + ";");
+        scroll.setStyle("-fx-background-color: " + tm.bgApp() + "; -fx-background: " + tm.bgApp() + ";");
+
+        // Text Areas
+        codeArea.setStyle(tm.getTextAreaStyle("Consolas", 13));
+        stdinArea.setStyle(tm.getTextAreaStyle("Consolas", 12));
+        sharedCodeArea.setStyle(tm.getTextAreaStyle("Consolas", 13));
+
+        // Labels
+        codeLabel.setStyle(tm.getLabelStyle(12, true, true));
+        stdinLabel.setStyle(tm.getLabelStyle(12, true, true));
+        outputLabel.setStyle(tm.getLabelStyle(12, true, true));
+        errorLabel.setStyle(tm.getLabelStyle(12, true, true));
+        hintLabel.setStyle(tm.getLabelStyle(12, true, true));
+        sharedCodeLabel.setStyle(tm.getLabelStyle(12, true, true));
+
+        // Output Areas with special backgrounds/colors
+        String outputBg = tm.isDarkMode() ? "#0a0f1d" : tm.bgInput();
+        String outputFg = tm.isDarkMode() ? tm.cyan() : tm.accent();
+        outputArea.setStyle(String.format(
+            "-fx-control-inner-background: %s; -fx-text-fill: %s; -fx-font-family: 'Consolas'; -fx-font-size: 12px; -fx-background-color: %s; -fx-border-color: %s; -fx-border-radius: 8; -fx-background-radius: 8;",
+            outputBg, outputFg, outputBg, tm.border()
+        ));
+
+        String errorBg = tm.isDarkMode() ? "#1a0a0f" : tm.bgInput();
+        String errorFg = tm.isDarkMode() ? tm.errorColor() : tm.errorColor();
+        errorArea.setStyle(String.format(
+            "-fx-control-inner-background: %s; -fx-text-fill: %s; -fx-font-family: 'Consolas'; -fx-font-size: 12px; -fx-background-color: %s; -fx-border-color: %s; -fx-border-radius: 8; -fx-background-radius: 8;",
+            errorBg, errorFg, errorBg, tm.border()
+        ));
+
+        String hintBg = tm.isDarkMode() ? "#1a150a" : tm.bgInput();
+        String hintFg = tm.isDarkMode() ? tm.warningColor() : tm.warningColor();
+        hintArea.setStyle(String.format(
+            "-fx-control-inner-background: %s; -fx-text-fill: %s; -fx-font-family: 'Segoe UI'; -fx-font-size: 12px; -fx-background-color: %s; -fx-border-color: %s; -fx-border-radius: 8; -fx-background-radius: 8;",
+            hintBg, hintFg, hintBg, tm.border()
+        ));
+
+        runBtn.setStyle(tm.getButtonStyle(tm.runColor()));
+        String clearBg = tm.isDarkMode() ? "#374151" : "#cbd5e1";
+        clearBtn.setStyle(tm.getButtonStyle(clearBg) + " -fx-text-fill: " + tm.textPrimary() + ";");
+
+        String shareBg = tm.isDarkMode() ? "#374151" : "#cbd5e1";
+        if (isSharing) {
+            shareBtn.setStyle(tm.getButtonStyle(tm.errorColor()));
+        } else {
+            shareBtn.setStyle(tm.getButtonStyle(shareBg) + " -fx-text-fill: " + tm.textPrimary() + ";");
+        }
+
+        // Hover bindings
+        runBtn.setOnMouseEntered(e -> runBtn.setStyle(tm.getButtonStyle(tm.runColorHover())));
+        runBtn.setOnMouseExited(e -> runBtn.setStyle(tm.getButtonStyle(tm.runColor())));
+
+        String clearBgHover = tm.isDarkMode() ? "#4b5563" : "#94a3b8";
+        clearBtn.setOnMouseEntered(e -> clearBtn.setStyle(tm.getButtonStyle(clearBgHover) + " -fx-text-fill: " + tm.textPrimary() + ";"));
+        clearBtn.setOnMouseExited(e -> clearBtn.setStyle(tm.getButtonStyle(clearBg) + " -fx-text-fill: " + tm.textPrimary() + ";"));
+
+        String shareBgHover = tm.isDarkMode() ? "#4b5563" : "#94a3b8";
+        shareBtn.setOnMouseEntered(e -> {
+            if (isSharing) {
+                shareBtn.setStyle(tm.getButtonStyle(tm.errorColor()));
+            } else {
+                shareBtn.setStyle(tm.getButtonStyle(shareBgHover) + " -fx-text-fill: " + tm.textPrimary() + ";");
+            }
+        });
+        shareBtn.setOnMouseExited(e -> {
+            if (isSharing) {
+                shareBtn.setStyle(tm.getButtonStyle(tm.errorColor()));
+            } else {
+                shareBtn.setStyle(tm.getButtonStyle(shareBg) + " -fx-text-fill: " + tm.textPrimary() + ";");
+            }
+        });
+
+        // Status Label
+        statusLabel.setStyle("-fx-text-fill: " + tm.textMuted() + "; -fx-font-size: 12px;");
     }
 
     private void run() {
@@ -138,11 +246,12 @@ public class CompilerTab extends Tab {
                 errorArea.setText(result.getRawErrors());
                 hintArea.setText(result.getFriendlyHint());
 
+                ThemeManager tm = ThemeManager.getInstance();
                 if (result.isSuccess()) {
-                    statusLabel.setStyle("-fx-text-fill: #22c55e; -fx-font-size: 12px;");
+                    statusLabel.setStyle("-fx-text-fill: " + tm.runColor() + "; -fx-font-size: 12px;");
                     statusLabel.setText("✔ Completed in " + result.getExecutionTimeMs() + " ms");
                 } else {
-                    statusLabel.setStyle("-fx-text-fill: #ef4444; -fx-font-size: 12px;");
+                    statusLabel.setStyle("-fx-text-fill: " + tm.errorColor() + "; -fx-font-size: 12px;");
                     statusLabel.setText("✘ Failed (exit " + result.getExitCode() + ")");
                 }
 
@@ -153,15 +262,6 @@ public class CompilerTab extends Tab {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
-    private static void styleTextArea(TextArea ta, String bg, String fg, String font, int size) {
-        ta.setStyle(String.format(
-                "-fx-control-inner-background: %s; -fx-text-fill: %s; " +
-                "-fx-font-family: '%s'; -fx-font-size: %dpx; " +
-                "-fx-background-color: %s; -fx-border-color: #2d2d45; " +
-                "-fx-border-radius: 8; -fx-background-radius: 8;",
-                bg, fg, font, size, bg));
-    }
-
     private static Label sectionLabel(String text) {
         Label l = new Label(text);
         l.setStyle("-fx-text-fill: #a0a0c0; -fx-font-size: 12px; -fx-font-family: 'Segoe UI';");
@@ -172,5 +272,67 @@ public class CompilerTab extends Tab {
         VBox box = new VBox(4, label, area);
         VBox.setVgrow(area, Priority.ALWAYS);
         return box;
+    }
+
+    private void toggleSharing() {
+        isSharing = !isSharing;
+        ThemeManager tm = ThemeManager.getInstance();
+        if (isSharing) {
+            shareBtn.setText("📡 Sharing Code...");
+            shareBtn.setStyle(tm.getButtonStyle(tm.errorColor()));
+            codeArea.textProperty().addListener(codeListener);
+            queueCodeShare();
+        } else {
+            shareBtn.setText("📡 Share Code");
+            shareBtn.setStyle(tm.getButtonStyle(tm.isDarkMode() ? "#374151" : "#cbd5e1") + " -fx-text-fill: " + tm.textPrimary() + ";");
+            codeArea.textProperty().removeListener(codeListener);
+            sendStopSharing();
+        }
+    }
+
+    private void queueCodeShare() {
+        if (!isSharing) return;
+        synchronized (this) {
+            if (pendingTask != null) {
+                pendingTask.cancel(false);
+            }
+            pendingTask = shareExecutor.schedule(this::sendCodeUpdate, 300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void sendCodeUpdate() {
+        try {
+            String code = codeArea.getText();
+            String encoded = java.net.URLEncoder.encode(code, "UTF-8");
+            if (MainWindow.getChatTab() != null) {
+                MainWindow.getChatTab().sendRawMessage("MSG:CODE_SHARE:" + encoded);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendStopSharing() {
+        if (MainWindow.getChatTab() != null) {
+            MainWindow.getChatTab().sendRawMessage("MSG:CODE_SHARE_STOP");
+        }
+    }
+
+    public void showSharedCode(String peerName, String code) {
+        Platform.runLater(() -> {
+            sharedCodeArea.setText(code);
+            sharedCodeLabel.setText("📺 Live: Viewing " + peerName + "'s Code");
+            if (editorSplitPane.getDividerPositions()[0] > 0.95) {
+                editorSplitPane.setDividerPositions(0.5);
+            }
+        });
+    }
+
+    public void hideSharedCode(String peerName) {
+        Platform.runLater(() -> {
+            sharedCodeArea.setText("");
+            sharedCodeLabel.setText("📺 Live Shared Code");
+            editorSplitPane.setDividerPositions(1.0);
+        });
     }
 }

@@ -1,6 +1,7 @@
 package com.javaplatform.view;
 
 import com.javaplatform.SessionState;
+import com.javaplatform.ThemeManager;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -25,23 +26,25 @@ public class LoginView {
     public void show() {
         primaryStage.setTitle("Java Platform — Welcome");
 
+        ThemeManager tm = ThemeManager.getInstance();
+
         // ── Root ──────────────────────────────────────────────────────────
         VBox root = new VBox(20);
         root.setAlignment(Pos.CENTER);
         root.setPadding(new Insets(60));
-        root.setStyle("-fx-background-color: #0f0f1a;");
+        root.setStyle("-fx-background-color: " + tm.bgApp() + ";");
 
         // ── Logo / Title ──────────────────────────────────────────────────
         Label logo = new Label("{ }");
         logo.setStyle("-fx-font-size: 52px; -fx-font-weight: bold; " +
-                      "-fx-text-fill: #7c3aed; -fx-font-family: 'Consolas';");
+                      "-fx-text-fill: " + tm.accent() + "; -fx-font-family: 'Consolas';");
 
         Label title = new Label("Java Platform");
         title.setStyle("-fx-font-size: 32px; -fx-font-weight: bold; " +
-                       "-fx-text-fill: #e0e0e0; -fx-font-family: 'Segoe UI';");
+                       "-fx-text-fill: " + tm.textPrimary() + "; -fx-font-family: 'Segoe UI';");
 
         Label subtitle = new Label("Compiler · Chat · Video · AI Assistant");
-        subtitle.setStyle("-fx-font-size: 14px; -fx-text-fill: #888; " +
+        subtitle.setStyle("-fx-font-size: 14px; -fx-text-fill: " + tm.textMuted() + "; " +
                           "-fx-font-family: 'Segoe UI';");
 
         // ── Card ──────────────────────────────────────────────────────────
@@ -49,38 +52,29 @@ public class LoginView {
         card.setAlignment(Pos.CENTER);
         card.setPadding(new Insets(36, 48, 36, 48));
         card.setMaxWidth(400);
-        card.setStyle("-fx-background-color: #1e1e2e; " +
+        card.setStyle("-fx-background-color: " + tm.bgCard() + "; " +
                       "-fx-background-radius: 16; " +
-                      "-fx-border-color: #2d2d45; " +
+                      "-fx-border-color: " + tm.border() + "; " +
                       "-fx-border-radius: 16; " +
                       "-fx-border-width: 1;");
 
         Label enterLabel = new Label("Enter your name to get started");
-        enterLabel.setStyle("-fx-font-size: 15px; -fx-text-fill: #c0c0c0; " +
+        enterLabel.setStyle("-fx-font-size: 15px; -fx-text-fill: " + tm.textMuted() + "; " +
                             "-fx-font-family: 'Segoe UI';");
 
         TextField nameField = new TextField();
         nameField.setPromptText("Your name…");
-        nameField.setStyle("-fx-background-color: #2a2a3e; " +
-                           "-fx-text-fill: #e0e0e0; " +
-                           "-fx-prompt-text-fill: #555; " +
-                           "-fx-border-color: #444; -fx-border-radius: 8; " +
-                           "-fx-background-radius: 8; " +
-                           "-fx-font-size: 15px; -fx-padding: 10 14;");
+        nameField.setStyle(tm.getTextFieldStyle(15));
         nameField.setMaxWidth(Double.MAX_VALUE);
 
         Label errorLabel = new Label("");
-        errorLabel.setStyle("-fx-text-fill: #ef4444; -fx-font-size: 12px;");
+        errorLabel.setStyle("-fx-text-fill: " + tm.errorColor() + "; -fx-font-size: 12px;");
 
         Button enterBtn = new Button("Enter Platform →");
         enterBtn.setMaxWidth(Double.MAX_VALUE);
-        enterBtn.setStyle("-fx-background-color: #7c3aed; " +
-                          "-fx-text-fill: white; " +
-                          "-fx-font-size: 15px; -fx-font-weight: bold; " +
-                          "-fx-background-radius: 8; -fx-padding: 12 20; " +
-                          "-fx-cursor: hand;");
-        enterBtn.setOnMouseEntered(e -> enterBtn.setStyle(enterBtn.getStyle().replace("#7c3aed", "#6d28d9")));
-        enterBtn.setOnMouseExited( e -> enterBtn.setStyle(enterBtn.getStyle().replace("#6d28d9", "#7c3aed")));
+        enterBtn.setStyle(tm.getButtonStyle(tm.accent()) + " -fx-font-size: 15px; -fx-padding: 12 20;");
+        enterBtn.setOnMouseEntered(e -> enterBtn.setStyle(tm.getButtonStyle(tm.accentHover()) + " -fx-font-size: 15px; -fx-padding: 12 20;"));
+        enterBtn.setOnMouseExited( e -> enterBtn.setStyle(tm.getButtonStyle(tm.accent()) + " -fx-font-size: 15px; -fx-padding: 12 20;"));
 
         card.getChildren().addAll(enterLabel, nameField, errorLabel, enterBtn);
 
@@ -96,6 +90,7 @@ public class LoginView {
                     return;
                 }
                 SessionState.getInstance().setUsername(name);
+                SessionState.getInstance().setServerHost("localhost");
                 System.out.println("[LoginView] Entering platform as: " + name);
                 new MainWindow(primaryStage).show();
             } catch (Exception ex) {

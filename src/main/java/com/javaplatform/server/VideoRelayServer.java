@@ -63,25 +63,26 @@ public class VideoRelayServer implements Runnable {
         }
     }
 
-    /** Generate a short room code */
-    String createRoom(PeerHandler creator) {
-        String roomId = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
+    /** Register a client-provided room code */
+    void createRoom(String roomId, PeerHandler creator) {
         List<PeerHandler> room = new CopyOnWriteArrayList<>();
         room.add(creator);
         rooms.put(roomId, room);
         creator.roomId = roomId;
-        return roomId;
     }
 
     /** Returns true if joined, false if room doesn't exist or full */
     boolean joinRoom(String roomId, PeerHandler joiner) {
         List<PeerHandler> room = rooms.get(roomId);
-        if (room == null || room.size() >= 2) return false;
+        if (room == null || room.size() >= 6) return false;
         room.add(joiner);
         joiner.roomId = roomId;
-        // notify both peers
+        // notify existing peers about the new joiner, and notify the new joiner about existing peers
         for (PeerHandler p : room) {
-            p.sendText("PEER_CONNECTED");
+            if (p != joiner) {
+                p.sendText("PEER_CONNECTED:" + joiner.username);
+                joiner.sendText("PEER_CONNECTED:" + p.username);
+            }
         }
         return true;
     }
@@ -91,7 +92,7 @@ public class VideoRelayServer implements Runnable {
         List<PeerHandler> room = rooms.get(h.roomId);
         if (room != null) {
             room.remove(h);
-            for (PeerHandler p : room) p.sendText("PEER_DISCONNECTED");
+            for (PeerHandler p : room) p.sendText("PEER_DISCONNECTED:" + h.username);
             if (room.isEmpty()) rooms.remove(h.roomId);
         }
         h.roomId = null;
@@ -102,8 +103,15 @@ public class VideoRelayServer implements Runnable {
         if (sender.roomId == null) return;
         List<PeerHandler> room = rooms.get(sender.roomId);
         if (room == null) return;
-        for (PeerHandler p : room) {
-            if (p != sender) p.sendFrame(frame);
+        try {
+            byte[] senderNameBytes = sender.username.getBytes("UTF-8");
+            for (PeerHandler p : room) {
+                if (p != sender) {
+                    p.sendRelayedFrame(senderNameBytes, frame);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
@@ -116,6 +124,9 @@ public class VideoRelayServer implements Runnable {
     public void stop() {
         running = false;
         try { if (serverSocket != null) serverSocket.close(); } catch (IOException ignored) {}
+        for (PeerHandler p : peers.values()) {
+            p.close();
+        }
     }
 
     // ── Inner: per-peer handler ─────────────────────────────────────────────
@@ -153,6 +164,18 @@ public class VideoRelayServer implements Runnable {
             } catch (IOException ignored) {}
         }
 
+        synchronized void sendRelayedFrame(byte[] senderNameBytes, byte[] frame) {
+            try {
+                out.writeInt(TYPE_FRAME);
+                int length = 4 + senderNameBytes.length + frame.length;
+                out.writeInt(length);
+                out.writeInt(senderNameBytes.length);
+                out.write(senderNameBytes);
+                out.write(frame);
+                out.flush();
+            } catch (IOException ignored) {}
+        }
+
         @Override
         public void run() {
             try {
@@ -184,10 +207,13 @@ public class VideoRelayServer implements Runnable {
             if (cmd.startsWith("REGISTER:")) {
                 username = cmd.substring(9).trim();
                 server.registerPeer(username, this);
-            } else if (cmd.equals("CREATE_ROOM")) {
-                String id = server.createRoom(this);
+            } else if (cmd.startsWith("CREATE_ROOM:")) {
+                server.leaveRoom(this);
+                String id = cmd.substring(12).trim();
+                server.createRoom(id, this);
                 sendText("ROOM_ID:" + id);
             } else if (cmd.startsWith("JOIN_ROOM:")) {
+                server.leaveRoom(this);
                 String id = cmd.substring(10).trim();
                 boolean ok = server.joinRoom(id, this);
                 if (!ok) sendText("ROOM_NOT_FOUND");
@@ -195,6 +221,10 @@ public class VideoRelayServer implements Runnable {
                 server.leaveRoom(this);
                 sendText("ROOM_LEFT");
             }
+        }
+
+        void close() {
+            try { socket.close(); } catch (IOException ignored) {}
         }
     }
 }

@@ -60,6 +60,9 @@ public class ChatServer implements Runnable {
     public void stop() {
         running = false;
         try { if (serverSocket != null) serverSocket.close(); } catch (IOException ignored) {}
+        for (ClientHandler c : clients) {
+            c.close();
+        }
     }
 
     // ── Inner: per-client handler ──────────────────────────────────────────
@@ -99,12 +102,16 @@ public class ChatServer implements Runnable {
             } catch (IOException e) {
                 // client disconnected
             } finally {
+                server.remove(this);
                 if (username != null) {
-                    server.remove(this);
                     server.broadcastAll("SYSTEM: " + username + " left the chat");
                 }
                 try { socket.close(); } catch (IOException ignored) {}
             }
+        }
+
+        void close() {
+            try { socket.close(); } catch (IOException ignored) {}
         }
     }
 }

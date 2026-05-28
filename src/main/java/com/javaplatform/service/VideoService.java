@@ -58,7 +58,12 @@ public class VideoService {
 
     /** Connect to the relay server and register username. */
     public void connect() throws IOException {
-        socket = new Socket(host, port);
+        connect(host);
+    }
+
+    public void connect(String targetHost) throws IOException {
+        socket = new Socket();
+        socket.connect(new java.net.InetSocketAddress(targetHost, port), 1500);
         in     = new DataInputStream(socket.getInputStream());
         out    = new DataOutputStream(socket.getOutputStream());
         connected = true;

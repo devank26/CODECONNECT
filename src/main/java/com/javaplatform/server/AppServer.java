@@ -61,6 +61,44 @@ public class AppServer {
                 System.out.println("[AppServer] UPnP port mapping failed: " + e.getMessage());
             }
         }, "upnp-mapping").start();
+
+        // Open Windows Firewall inbound rules for LAN/hotspot connectivity
+        new Thread(AppServer::ensureWindowsFirewallRules, "firewall-setup").start();
+    }
+
+    /**
+     * Silently adds Windows Firewall inbound TCP rules for ports 9001 and 9002.
+     * This allows peers on the same LAN / hotspot to connect without manual
+     * firewall configuration.  The command is a no-op if the rule already exists.
+     * Runs only on Windows; silently skipped on other platforms.
+     */
+    private static void ensureWindowsFirewallRules() {
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) return;
+        String[][] rules = {
+            {"CodeConnect-Chat-9001",  "9001"},
+            {"CodeConnect-Video-9002", "9002"}
+        };
+        for (String[] rule : rules) {
+            String name = rule[0];
+            String port = rule[1];
+            try {
+                // Delete any stale rule first (ignore errors), then add fresh
+                String deleteCmd = "netsh advfirewall firewall delete rule name=\"" + name + "\" protocol=TCP dir=in";
+                Runtime.getRuntime().exec(new String[]{"cmd", "/c", deleteCmd}).waitFor();
+
+                String addCmd = "netsh advfirewall firewall add rule"
+                        + " name=\"" + name + "\""
+                        + " protocol=TCP dir=in action=allow"
+                        + " localport=" + port
+                        + " profile=any";
+                Process p = Runtime.getRuntime().exec(new String[]{"cmd", "/c", addCmd});
+                int exitCode = p.waitFor();
+                System.out.println("[AppServer] Firewall rule '" + name + "' port " + port
+                        + (exitCode == 0 ? " → opened ✓" : " → failed (exit " + exitCode + ", may need admin)"));
+            } catch (Exception e) {
+                System.out.println("[AppServer] Could not set firewall rule for port " + port + ": " + e.getMessage());
+            }
+        }
     }
 
     public static void stop() {

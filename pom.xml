@@ -50,6 +50,13 @@
             <artifactId>json</artifactId>
             <version>20231013</version>
         </dependency>
+
+        <!-- WaifUPnP for automatic router port mapping -->
+        <dependency>
+            <groupId>org.bitlet</groupId>
+            <artifactId>weupnp</artifactId>
+            <version>0.1.4</version>
+        </dependency>
     </dependencies>
 
     <build>

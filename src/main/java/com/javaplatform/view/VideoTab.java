@@ -375,13 +375,6 @@ public class VideoTab extends Tab {
     }
 
     public static String getLocalIPAddress() {
-        try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
-            socket.connect(java.net.InetAddress.getByName("8.8.8.8"), 10002);
-            String ip = socket.getLocalAddress().getHostAddress();
-            if (ip != null && !ip.isEmpty() && !ip.equals("0.0.0.0")) {
-                return ip;
-            }
-        } catch (Exception ignored) {}
         try {
             java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
@@ -390,16 +383,28 @@ public class VideoTab extends Tab {
                 String name = iface.getName().toLowerCase();
                 String displayName = iface.getDisplayName().toLowerCase();
                 if (name.contains("vbox") || name.contains("virtual") || name.contains("vmnet") || name.contains("wsl") ||
-                    displayName.contains("vbox") || displayName.contains("virtual") || displayName.contains("vmnet") || displayName.contains("wsl")) {
+                    name.contains("vpn") || name.contains("tun") || name.contains("tap") || name.contains("ppp") || name.contains("proton") ||
+                    displayName.contains("vbox") || displayName.contains("virtual") || displayName.contains("vmnet") || displayName.contains("wsl") ||
+                    displayName.contains("vpn") || displayName.contains("tun") || displayName.contains("tap") || displayName.contains("ppp") || displayName.contains("proton")) {
                     continue;
                 }
                 java.util.Enumeration<java.net.InetAddress> addresses = iface.getInetAddresses();
                 while (addresses.hasMoreElements()) {
                     java.net.InetAddress addr = addresses.nextElement();
                     if (addr instanceof java.net.Inet4Address) {
-                        return addr.getHostAddress();
+                        String ip = addr.getHostAddress();
+                        if (!ip.equals("127.0.0.1") && !ip.equals("0.0.0.0")) {
+                            return ip;
+                        }
                     }
                 }
+            }
+        } catch (Exception ignored) {}
+        try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
+            socket.connect(java.net.InetAddress.getByName("8.8.8.8"), 10002);
+            String ip = socket.getLocalAddress().getHostAddress();
+            if (ip != null && !ip.isEmpty() && !ip.equals("0.0.0.0")) {
+                return ip;
             }
         } catch (Exception ignored) {}
         try {

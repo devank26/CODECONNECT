@@ -84,9 +84,17 @@ public class VideoTab extends Tab {
 
         // ── Room controls ─────────────────────────────────────────────────
         createBtn.setOnAction(e -> {
-            String myIp = getLocalIPAddress();
-            String myRoomId = encodeIpToRoomId(myIp);
-            reconnectVideoAndChat("localhost", myRoomId, true);
+            createBtn.setDisable(true);
+            createBtn.setText("⏳ Resolving...");
+            new Thread(() -> {
+                String myIp = getPublicIPAddress();
+                String myRoomId = encodeIpToRoomId(myIp);
+                Platform.runLater(() -> {
+                    createBtn.setDisable(false);
+                    createBtn.setText("Create Room");
+                    reconnectVideoAndChat("localhost", myRoomId, true);
+                });
+            }, "public-ip-resolver").start();
         });
 
         roomField.setPromptText("Room ID…");
@@ -263,9 +271,10 @@ public class VideoTab extends Tab {
         );
 
         // Connect in background
+        final VideoService serviceInstance = videoService;
         new Thread(() -> {
             try {
-                videoService.connect();
+                serviceInstance.connect();
                 Platform.runLater(() -> {
                     ThemeManager tm = ThemeManager.getInstance();
                     statusLabel.setText("● Connected to video server");
@@ -336,6 +345,26 @@ public class VideoTab extends Tab {
             ImageView iv = (ImageView) box.getChildren().get(1);
             Platform.runLater(() -> iv.setImage(img));
         }
+    }
+
+    public static String getPublicIPAddress() {
+        String[] services = {
+            "https://api.ipify.org",
+            "http://checkip.amazonaws.com",
+            "https://ipv4.icanhazip.com"
+        };
+        for (String service : services) {
+            try (java.io.BufferedReader in = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(new java.net.URL(service).openStream(), "UTF-8"))) {
+                String ip = in.readLine().trim();
+                if (ip.matches("^(\\d{1,3}\\.){3}\\d{1,3}$")) {
+                    System.out.println("[VideoTab] Successfully resolved public IP: " + ip + " via " + service);
+                    return ip;
+                }
+            } catch (Exception ignored) {}
+        }
+        System.out.println("[VideoTab] Public IP resolution failed. Falling back to active local IP.");
+        return getLocalIPAddress();
     }
 
     public static String getLocalIPAddress() {
@@ -460,17 +489,18 @@ public class VideoTab extends Tab {
                 }
         );
 
+        final VideoService serviceInstance = videoService;
         new Thread(() -> {
             try {
-                videoService.connect();
+                serviceInstance.connect();
                 Platform.runLater(() -> {
                     ThemeManager tm = ThemeManager.getInstance();
                     statusLabel.setText("● Connected to video server");
                     statusLabel.setStyle("-fx-text-fill: " + tm.runColor() + "; -fx-font-size: 12px;");
                     if (isCreate) {
-                        videoService.createRoom(roomId);
+                        serviceInstance.createRoom(roomId);
                     } else {
-                        videoService.joinRoom(roomId);
+                        serviceInstance.joinRoom(roomId);
                     }
                 });
             } catch (Exception e) {
